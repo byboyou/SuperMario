@@ -515,8 +515,8 @@ class Level1(tools._State):
             self.mario.rect.y += round(self.mario.y_vel)
             self.check_mario_y_collisions()
 
-        if self.mario.rect.x < (self.viewport.x + 5):
-            self.mario.rect.x = (self.viewport.x + 5)
+        if self.mario.rect.x < (self.viewport.x - 50):  # 允许向左移动更多
+            self.mario.rect.x = (self.viewport.x - 50) 
 
 
     def check_mario_x_collisions(self):
@@ -1370,12 +1370,19 @@ class Level1(tools._State):
         third = self.viewport.x + self.viewport.w//3
         mario_center = self.mario.rect.centerx
         mario_right = self.mario.rect.right
+        mario_left = self.mario.rect.left
 
         if self.mario.x_vel > 0 and mario_center >= third:
             mult = 0.5 if mario_right < self.viewport.centerx else 1
             new = self.viewport.x + mult * self.mario.x_vel
             highest = self.level_rect.w - self.viewport.w
             self.viewport.x = min(highest, new)
+        # 新增：向左滚动的逻辑
+        elif self.mario.x_vel < 0 and mario_center <= third:
+            # 当马里奥向左移动并且接近屏幕左侧1/3时，相机向左移动
+            mult = 0.5 if mario_left > self.viewport.centerx else 1
+            new = self.viewport.x + mult * self.mario.x_vel  # x_vel是负值，所以这里是向左移动
+            self.viewport.x = max(0, new)  # 确保不会滚动到地图最左侧之外
 
 
     def update_while_in_castle(self):
