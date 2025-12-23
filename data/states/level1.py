@@ -516,7 +516,10 @@ class Level1(tools._State):
             self.check_mario_y_collisions()
 
         if self.mario.rect.x < (self.viewport.x - 50):  # 允许向左移动更多
-            self.mario.rect.x = (self.viewport.x - 50) 
+            self.mario.rect.x = (self.viewport.x - 50)
+
+        if self.mario.rect.x < 0: # 防止掉到地图外
+            self.mario.rect.x = 0
 
 
     def check_mario_x_collisions(self):
