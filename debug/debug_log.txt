@@ -1,0 +1,8 @@
+无法回滚.png：地图一旦过去就无法回滚
+
+神秘bug.png：按下滑行和其他键（未知），会触发神秘bug，马里奥瞬移，并且卡进地图
+
+人物掉出地图：将游戏地图修改回滚后，人物会掉出地图，直接死亡
+修改bug：在level1里的def adjust_mario_position(self)里添加判断逻辑
+if self.mario.rect.x < 0: # 防止掉到地图外
+            self.mario.rect.x = 0
