@@ -55,10 +55,18 @@ class Control(object):
                 self.done = True
             elif event.type == pg.KEYDOWN:
                 self.keys = pg.key.get_pressed()
+                # 检测 F 键作弊
                 self.toggle_show_fps(event.key)
+                if event.key == pg.K_f:
+                    self.toggle_cheat_mode()
             elif event.type == pg.KEYUP:
                 self.keys = pg.key.get_pressed()
             self.state.get_event(event)
+    def toggle_cheat_mode(self):
+        """切换作弊模式"""
+        # 如果当前状态是Level1，则调用其作弊方法
+        if hasattr(self.state, 'toggle_cheat_mode'):
+            self.state.toggle_cheat_mode(pg.time.get_ticks())
 
 
     def toggle_show_fps(self, key):

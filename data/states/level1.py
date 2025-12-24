@@ -20,6 +20,11 @@ from .. components import castle_flag
 class Level1(tools._State):
     def __init__(self):
         tools._State.__init__(self)
+        # 添加作弊相关属性
+        self.cheat_mode = False
+        self.cheat_activated = False
+        self.last_f_key_press_time = 0
+        self.f_key_cooldown = 500  # 500ms冷却时间防止重复触发
 
     def startup(self, current_time, persist):
         """Called when the State object is created"""
@@ -28,6 +33,8 @@ class Level1(tools._State):
         self.game_info[c.CURRENT_TIME] = current_time
         self.game_info[c.LEVEL_STATE] = c.NOT_FROZEN
         self.game_info[c.MARIO_DEAD] = False
+        self.cheat_mode = False
+
 
         self.state = c.NOT_FROZEN
         self.death_timer = 0
@@ -50,6 +57,86 @@ class Level1(tools._State):
         self.setup_mario()
         self.setup_checkpoints()
         self.setup_spritegroups()
+
+    def toggle_cheat_mode(self, current_time):
+        """切换作弊模式"""
+        if current_time - self.last_f_key_press_time < self.f_key_cooldown:
+            return
+    
+        self.last_f_key_press_time = current_time
+        self.cheat_mode = not self.cheat_mode
+    
+        if self.cheat_mode and not self.cheat_activated:
+            # 激活作弊
+            self.cheat_activated = True
+            self.activate_cheat_mode()
+        elif not self.cheat_mode and self.cheat_activated:
+            # 关闭作弊
+            self.deactivate_cheat_mode()
+
+    def update(self, surface, keys, current_time):
+        """Updates Entire level using states.  Called by the control object"""
+        self.game_info[c.CURRENT_TIME] = self.current_time = current_time
+        # 检测F键按下
+        if keys[pg.K_f]:
+            self.toggle_cheat_mode(current_time)
+        
+        # 检测F键按下（备用检测方式）
+        if keys[pg.K_f] and not self.f_key_pressed:
+            self.f_key_pressed = True
+            self.toggle_cheat_mode(current_time)
+        elif not keys[pg.K_f]:
+            self.f_key_pressed = False
+            
+        self.handle_states(keys)
+        self.check_if_time_out()
+        self.blit_everything(surface)
+        self.sound_manager.update(self.game_info, self.mario)
+        
+        # 确保作弊状态持续生效
+        if self.cheat_mode and self.mario:
+            self.mario.invincible = True
+            # 确保生命数保持9999
+            if self.game_info[c.LIVES] < 9999:
+                self.game_info[c.LIVES] = 9999
+    def activate_cheat_mode(self):
+        """激活作弊模式"""
+        if self.mario:
+            # 设置作弊状态
+            self.mario.cheat_mode = True
+            self.mario.cheat_invincible = True
+            self.mario.original_invincible = self.mario.invincible
+            self.mario.invincible = True  # 确保无敌状态
+        
+            # 设置9999条命
+            self.game_info[c.LIVES] = 9999
+        
+            # 播放音效
+            if hasattr(setup, 'SFX') and 'powerup' in setup.SFX:
+                setup.SFX['powerup'].play()
+        
+            # 在屏幕上显示作弊提示
+            self.show_cheat_message("CHEAT MODE: GOD MODE + 9999 LIVES")
+        
+            print("作弊模式激活：无敌状态 + 9999条命")
+
+    def deactivate_cheat_mode(self):
+        """关闭作弊模式"""
+        if self.mario:
+            self.mario.cheat_mode = False
+            self.mario.cheat_invincible = False
+            # 恢复原来的无敌状态
+            self.mario.invincible = self.mario.original_invincible
+            self.cheat_activated = False
+            print("作弊模式关闭")
+
+    def show_cheat_message(self, message):
+        """在屏幕上显示作弊信息"""
+        # 这里可以在屏幕上显示作弊信息
+        # 你可以添加一个临时文本显示
+        self.cheat_message = message
+        self.cheat_message_timer = self.current_time
+        self.cheat_message_duration = 3000  # 显示3秒
 
 
     def setup_background(self):
@@ -351,14 +438,6 @@ class Level1(tools._State):
                                                      self.enemy_group)
 
 
-    def update(self, surface, keys, current_time):
-        """Updates Entire level using states.  Called by the control object"""
-        self.game_info[c.CURRENT_TIME] = self.current_time = current_time
-        self.handle_states(keys)
-        self.check_if_time_out()
-        self.blit_everything(surface)
-        self.sound_manager.update(self.game_info, self.mario)
-
 
 
     def handle_states(self, keys):
@@ -538,7 +617,17 @@ class Level1(tools._State):
             self.adjust_mario_for_x_collisions(collider)
 
         elif enemy:
-            if self.mario.invincible:
+            if self.cheat_mode:
+                # 作弊模式：不受敌人伤害
+                setup.SFX['kick'].play()
+                self.game_info[c.SCORE] += 100
+                self.moving_score_list.append(
+                    score.Score(self.mario.rect.right - self.viewport.x,
+                                self.mario.rect.y, 100))
+                enemy.kill()
+                enemy.start_death_jump(c.RIGHT)
+                self.sprites_about_to_die_group.add(enemy)
+            elif self.mario.invincible:
                 setup.SFX['kick'].play()
                 self.game_info[c.SCORE] += 100
                 self.moving_score_list.append(
@@ -871,6 +960,22 @@ class Level1(tools._State):
 
     def adjust_mario_for_y_enemy_collisions(self, enemy):
         """Mario collisions with all enemies on the y-axis"""
+        # 作弊模式下的特殊处理
+        if self.cheat_mode:
+            setup.SFX['stomp'].play()
+            self.game_info[c.SCORE] += 100
+            self.moving_score_list.append(
+                score.Score(enemy.rect.centerx - self.viewport.x,
+                        enemy.rect.y, 100))
+            enemy.state = c.JUMPED_ON
+            enemy.kill()
+            if enemy.name == c.GOOMBA:
+                enemy.death_timer = self.current_time
+                self.sprites_about_to_die_group.add(enemy)
+            elif enemy.name == c.KOOPA:
+                self.shell_group.add(enemy)
+            return
+        
         if self.mario.y_vel > 0:
             setup.SFX['stomp'].play()
             self.game_info[c.SCORE] += 100
@@ -1316,6 +1421,15 @@ class Level1(tools._State):
 
     def check_for_mario_death(self):
         """Restarts the level if Mario is dead"""
+        # 作弊模式下不会死亡
+        if self.cheat_mode and self.mario.rect.y > c.SCREEN_HEIGHT and not self.mario.in_castle:
+            # 将Mario重置到安全位置
+            self.mario.rect.bottom = c.GROUND_HEIGHT
+            self.mario.rect.x = self.mario.rect.x - 100
+            self.mario.state = c.STAND
+            self.mario.y_vel = 0
+            return
+        
         if self.mario.rect.y > c.SCREEN_HEIGHT and not self.mario.in_castle:
             self.mario.dead = True
             self.mario.x_vel = 0
@@ -1428,7 +1542,6 @@ class Level1(tools._State):
         self.coin_box_group.draw(self.level)
         self.sprites_about_to_die_group.draw(self.level)
         self.shell_group.draw(self.level)
-        #self.check_point_group.draw(self.level)
         self.brick_pieces_group.draw(self.level)
         self.flag_pole_group.draw(self.level)
         self.mario_and_enemy_group.draw(self.level)
@@ -1437,5 +1550,22 @@ class Level1(tools._State):
         self.overhead_info_display.draw(surface)
         for score in self.moving_score_list:
             score.draw(surface)
+    
+        # 绘制作弊模式指示器
+        self.draw_cheat_indicator(surface)
+
+    def draw_cheat_indicator(self, surface):
+        """在屏幕上绘制作弊模式指示器"""
+        if self.cheat_mode:
+            font = pg.font.SysFont('Arial', 20)
+            text = font.render("CHEAT MODE: GOD MODE + 9999 LIVES", True, (255, 255, 0))
+            surface.blit(text, (10, 50))
+        
+            # 显示倒计时提示（如果设置了显示时间）
+            if hasattr(self, 'cheat_message_timer'):
+                elapsed = self.current_time - self.cheat_message_timer
+                if elapsed < self.cheat_message_duration:
+                    text = font.render(self.cheat_message, True, (255, 255, 0))
+                    surface.blit(text, (10, 80))
 
 
