@@ -1,5 +1,7 @@
 from __future__ import division
 
+import os
+import pickle
 
 import pygame as pg
 from .. import setup, tools
@@ -25,16 +27,25 @@ class Level1(tools._State):
         self.cheat_activated = False
         self.last_f_key_press_time = 0
         self.f_key_cooldown = 500  # 500ms冷却时间防止重复触发
+        # 存档相关属性
+        self.last_auto_save_time = 0
+        self.f5_pressed = False  # 存档按键状态
+        self.f9_pressed = False  # 读档按键状态
+        
+        # 消息显示相关
+        self.save_message = ""
+        self.save_message_timer = 0
+        self.save_message_duration = 2000
 
     def startup(self, current_time, persist):
         """Called when the State object is created"""
+        # 正常初始化流程
         self.game_info = persist
         self.persist = self.game_info
         self.game_info[c.CURRENT_TIME] = current_time
         self.game_info[c.LEVEL_STATE] = c.NOT_FROZEN
         self.game_info[c.MARIO_DEAD] = False
         self.cheat_mode = False
-
 
         self.state = c.NOT_FROZEN
         self.death_timer = 0
@@ -58,6 +69,114 @@ class Level1(tools._State):
         self.setup_checkpoints()
         self.setup_spritegroups()
 
+    def get_save_data(self):
+        """获取当前游戏状态数据用于存档"""
+        try:
+            # 收集马里奥状态
+            mario_state = {
+                'x': self.mario.rect.x,
+                'y': self.mario.rect.y,
+                'state': self.mario.state,
+                'big': self.mario.big,
+                'fire': self.mario.fire,
+                'invincible': self.mario.invincible,
+                'facing_right': self.mario.facing_right,
+                'cheat_mode': self.cheat_mode
+            }
+            
+            # 收集关卡状态
+            level_state = {
+                'viewport_x': self.viewport.x,
+                'camera_start_x': self.game_info[c.CAMERA_START_X],
+                'level_state': self.state,
+                'time': self.overhead_info_display.time
+            }
+            
+            return {
+                'game_info': self.game_info.copy(),
+                'level_state': level_state,
+                'mario_state': mario_state
+            }
+        except Exception as e:
+            print(f"获取存档数据失败: {e}")
+            return None
+
+    def load_from_save_data(self, save_data):
+        """从存档数据加载游戏状态"""
+        try:
+            if not save_data:
+                return False
+            
+            # 恢复游戏信息
+            self.game_info.update(save_data['game_info'])
+            self.persist = self.game_info
+            
+            # 恢复关卡状态
+            level_state = save_data['level_state']
+            self.viewport.x = level_state['viewport_x']
+            self.game_info[c.CAMERA_START_X] = level_state['camera_start_x']
+            self.state = level_state['level_state']
+            self.overhead_info_display.time = level_state['time']
+            
+            # 恢复马里奥状态
+            mario_state = save_data['mario_state']
+            self.mario.rect.x = mario_state['x']
+            self.mario.rect.y = mario_state['y']
+            self.mario.state = mario_state['state']
+            self.mario.big = mario_state['big']
+            self.mario.fire = mario_state['fire']
+            self.mario.invincible = mario_state['invincible']
+            self.mario.facing_right = mario_state['facing_right']
+            
+            # 恢复作弊模式
+            self.cheat_mode = mario_state.get('cheat_mode', False)
+            if self.cheat_mode:
+                self.activate_cheat_mode()
+            
+            # 更新显示信息
+            self.overhead_info_display.update(self.game_info, self.mario)
+            
+            print("游戏状态已从存档恢复")
+            return True
+            
+        except Exception as e:
+            print(f"加载存档数据失败: {e}")
+            return False
+
+    def auto_save(self):
+        """自动存档（在检查点触发时调用）"""
+        current_time = pg.time.get_ticks()
+        # 防止过于频繁的自动存档（至少间隔30秒）
+        if hasattr(self, 'last_auto_save_time') and current_time - self.last_auto_save_time < 30000:
+            return
+        
+        save_data = self.get_save_data()
+        if save_data:
+            # 自动存档到特殊槽位
+            try:
+                import os
+                save_path = os.path.join("saves", "auto_save.dat")
+                with open(save_path, 'wb') as f:
+                    import pickle
+                    pickle.dump(save_data, f)
+                self.last_auto_save_time = current_time
+                print("自动存档完成")
+            except Exception as e:
+                print(f"自动存档失败: {e}")
+
+    # 在检查点方法中添加自动存档
+    def check_points_check(self):
+        """Detect if checkpoint collision occurs, delete checkpoint,
+        add enemies to self.enemy_group"""
+        checkpoint = pg.sprite.spritecollideany(self.mario,
+                                                 self.check_point_group)
+        if checkpoint:
+            checkpoint.kill()
+
+            # 重要检查点触发自动存档
+            if checkpoint.name in ['5', '10', '11']:  # 在关键检查点自动存档
+                self.auto_save()
+
     def toggle_cheat_mode(self, current_time):
         """切换作弊模式"""
         if current_time - self.last_f_key_press_time < self.f_key_cooldown:
@@ -80,6 +199,22 @@ class Level1(tools._State):
         # 检测F键按下
         if keys[pg.K_f]:
             self.toggle_cheat_mode(current_time)
+
+        # 检测F5键按下（存档）
+        if keys[pg.K_F5]:
+            if not self.f5_pressed:  # 防止连续触发
+                self.f5_pressed = True
+                self.save_game()
+        else:
+            self.f5_pressed = False
+            
+        # 检测F9键按下（读档）
+        if keys[pg.K_F9]:
+            if not self.f9_pressed:  # 防止连续触发
+                self.f9_pressed = True
+                self.load_game()
+        else:
+            self.f9_pressed = False
         
         # 检测F键按下（备用检测方式）
         if keys[pg.K_f] and not self.f_key_pressed:
@@ -99,6 +234,59 @@ class Level1(tools._State):
             # 确保生命数保持9999
             if self.game_info[c.LIVES] < 9999:
                 self.game_info[c.LIVES] = 9999
+    
+    def save_game(self):
+        """手动存档游戏"""
+        save_data = self.get_save_data()
+        if save_data:
+            try:
+                import os
+                # 确保saves目录存在
+                if not os.path.exists("saves"):
+                    os.makedirs("saves")
+                
+                save_path = os.path.join("saves", "manual_save.dat")
+                with open(save_path, 'wb') as f:
+                    import pickle
+                    pickle.dump(save_data, f)
+                
+                # 显示存档成功消息
+                self.show_save_message("Game Saved Successfully!")
+                print("手动存档完成")
+            except Exception as e:
+                print(f"手动存档失败: {e}")
+                self.show_save_message("Save Failed!")
+
+    def load_game(self):
+        """手动读档游戏"""
+        try:
+            import os
+            save_path = os.path.join("saves", "manual_save.dat")
+            
+            if os.path.exists(save_path):
+                with open(save_path, 'rb') as f:
+                    import pickle
+                    save_data = pickle.load(f)
+                
+                if self.load_from_save_data(save_data):
+                    self.show_save_message("Game Loaded Successfully!")
+                    print("手动读档完成")
+                else:
+                    self.show_save_message("Load Failed!")
+            else:
+                self.show_save_message("No Save File Found!")
+                print("未找到存档文件")
+        except Exception as e:
+            print(f"手动读档失败: {e}")
+            self.show_save_message("Load Failed!")
+
+    def show_save_message(self, message):
+        """显示存档/读档消息"""
+        self.save_message = message
+        self.save_message_timer = self.current_time
+        self.save_message_duration = 2000  # 显示2秒
+
+
     def activate_cheat_mode(self):
         """激活作弊模式"""
         if self.mario:
@@ -1557,6 +1745,9 @@ class Level1(tools._State):
         # 绘制作弊模式指示器
         self.draw_cheat_indicator(surface)
 
+        # 绘制存档/读档消息
+        self.draw_save_message(surface)
+
     def draw_cheat_indicator(self, surface):
         """在屏幕上绘制作弊模式指示器"""
         if self.cheat_mode:
@@ -1571,4 +1762,12 @@ class Level1(tools._State):
                     text = font.render(self.cheat_message, True, (255, 255, 0))
                     surface.blit(text, (10, 80))
 
-
+    def draw_save_message(self, surface):
+        """在屏幕上绘制存档/读档消息"""
+        if hasattr(self, 'save_message_timer'):
+            elapsed = self.current_time - self.save_message_timer
+            if elapsed < self.save_message_duration:
+                font = pg.font.SysFont('Arial', 24)
+                text = font.render(self.save_message, True, (255, 255, 0))
+                text_rect = text.get_rect(center=(surface.get_width()//2, 100))
+                surface.blit(text, text_rect)
