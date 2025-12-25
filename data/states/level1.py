@@ -37,6 +37,10 @@ class Level1(tools._State):
         self.save_message_timer = 0
         self.save_message_duration = 2000
 
+        # 添加截图相关属性
+        self.g_key_pressed = False
+        self.screenshot_counter = 0
+
     def startup(self, current_time, persist):
         """Called when the State object is created"""
         # 正常初始化流程
@@ -222,6 +226,13 @@ class Level1(tools._State):
             self.toggle_cheat_mode(current_time)
         elif not keys[pg.K_f]:
             self.f_key_pressed = False
+
+        # 检测G键按下（截图功能）
+        if keys[pg.K_g] and not self.g_key_pressed:
+            self.g_key_pressed = True
+            self.take_screenshot(surface)
+        elif not keys[pg.K_g]:
+            self.g_key_pressed = False
             
         self.handle_states(keys)
         self.check_if_time_out()
@@ -316,12 +327,11 @@ class Level1(tools._State):
             # 恢复原来的无敌状态
             self.mario.invincible = self.mario.original_invincible
             self.cheat_activated = False
+            self.game_info[c.LIVES] = 3
             print("作弊模式关闭")
 
     def show_cheat_message(self, message):
         """在屏幕上显示作弊信息"""
-        # 这里可以在屏幕上显示作弊信息
-        # 你可以添加一个临时文本显示
         self.cheat_message = message
         self.cheat_message_timer = self.current_time
         self.cheat_message_duration = 3000  # 显示3秒
@@ -1744,23 +1754,66 @@ class Level1(tools._State):
     
         # 绘制作弊模式指示器
         self.draw_cheat_indicator(surface)
-
         # 绘制存档/读档消息
         self.draw_save_message(surface)
 
+    def take_screenshot(self, surface):
+        """截图并保存到pictures文件夹"""
+        # 获取当前文件所在目录的父级目录
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(current_dir)
+        pictures_dir = os.path.join(parent_dir, 'pictures')
+    
+        # 如果pictures目录不存在，则创建它
+        if not os.path.exists(pictures_dir):
+            os.makedirs(pictures_dir)
+    
+        # 生成截图文件名（包含时间戳和计数器）
+        timestamp = pg.time.get_ticks()
+        self.screenshot_counter += 1
+        filename = f"screenshot_{self.screenshot_counter}_{timestamp}.png"
+        filepath = os.path.join(pictures_dir, filename)
+    
+        # 保存截图
+        try:
+            pg.image.save(surface, filepath)
+            print(f"screenshot saved: {filepath}")
+        
+            # 在屏幕上显示截图提示
+            self.show_screenshot_message(f"screenshot saved: {filename}")
+        except Exception as e:
+            print(f"截图保存失败: {e}")
+
+    def show_screenshot_message(self, message):
+        """在屏幕上显示截图信息"""
+        self.screenshot_message = message
+        self.screenshot_message_timer = self.current_time
+        self.screenshot_message_duration = 2000  # 显示2秒
+
+
+
     def draw_cheat_indicator(self, surface):
-        """在屏幕上绘制作弊模式指示器"""
+        """在屏幕上绘制作弊模式指示器和截图提示"""
         if self.cheat_mode:
             font = pg.font.SysFont('Arial', 20)
             text = font.render("CHEAT MODE: GOD MODE + 9999 LIVES", True, (255, 255, 0))
             surface.blit(text, (10, 50))
-        
-            # 显示倒计时提示（如果设置了显示时间）
-            if hasattr(self, 'cheat_message_timer'):
-                elapsed = self.current_time - self.cheat_message_timer
-                if elapsed < self.cheat_message_duration:
-                    text = font.render(self.cheat_message, True, (255, 255, 0))
-                    surface.blit(text, (10, 80))
+    
+        # 显示截图提示
+        if hasattr(self, 'screenshot_message_timer'):
+            elapsed = self.current_time - self.screenshot_message_timer
+            if elapsed < self.screenshot_message_duration:
+                font = pg.font.SysFont('Arial', 20)
+                text = font.render(self.screenshot_message, True, (0, 255, 0))
+                surface.blit(text, (10, 80))
+    
+        # 显示作弊模式
+        if hasattr(self, 'cheat_message_timer'):
+            elapsed = self.current_time - self.cheat_message_timer
+            if elapsed < self.cheat_message_duration:
+                font = pg.font.SysFont('Arial', 20)
+                text = font.render(self.cheat_message, True, (255, 255, 0))
+                surface.blit(text, (10, 110))
 
     def draw_save_message(self, surface):
         """在屏幕上绘制存档/读档消息"""
