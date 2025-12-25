@@ -135,6 +135,7 @@ ONEUP = '379'
 #MAIN MENU CURSOR STATES
 PLAYER1 = '1 player'
 PLAYER2 = '2 player'
+INSTRUCTIONS = 'instructions'
 
 #OVERHEAD INFO STATES
 MAIN_MENU = 'main menu'
