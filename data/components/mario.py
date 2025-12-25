@@ -11,6 +11,11 @@ class Mario(pg.sprite.Sprite):
         pg.sprite.Sprite.__init__(self)
         self.sprite_sheet = setup.GFX['mario_bros']
 
+        # 添加作弊相关属性
+        self.cheat_mode = False
+        self.cheat_invincible = False
+        self.original_invincible = False
+
         self.setup_timers()
         self.setup_state_booleans()
         self.setup_forces()
@@ -53,6 +58,11 @@ class Mario(pg.sprite.Sprite):
         self.in_castle = False
         self.crouching = False
         self.losing_invincibility = False
+    
+        # 添加作弊模式相关属性
+        self.cheat_mode = False
+        self.cheat_invincible = False
+        self.original_invincible = False
 
 
     def setup_forces(self):
@@ -689,6 +699,24 @@ class Mario(pg.sprite.Sprite):
 
     def start_death_jump(self, game_info):
         """Used to put Mario in a DEATH_JUMP state"""
+        print("yes")
+        # 作弊模式下不会死亡
+        if self.cheat_mode :
+            # 重置位置到安全位置
+            self.rect.x = self.rect.x-200
+            self.rect.bottom = c.GROUND_HEIGHT
+            print(self.rect.x)
+            print(self.rect.bottom)
+            self.state = c.STAND
+            self.y_vel = 0
+            self.x_vel = 0
+            self.in_transition_state = False
+            self.dead = False
+
+            if hasattr(self, 'game_info'):
+                self.game_info[c.MARIO_DEAD] = False
+            return
+        
         self.dead = True
         game_info[c.MARIO_DEAD] = True
         self.y_vel = -11
@@ -851,6 +879,11 @@ class Mario(pg.sprite.Sprite):
     def changing_to_small(self):
         """Mario's state and animation when he shrinks from big to small
         after colliding with an enemy"""
+        if self.cheat_mode and self.cheat_invincible:
+            self.state = c.WALK
+            self.in_transition_state = False
+            return
+        
         self.in_transition_state = True
         self.hurt_invincible = True
         self.state = c.BIG_TO_SMALL
@@ -1031,7 +1064,20 @@ class Mario(pg.sprite.Sprite):
 
 
     def check_if_invincible(self):
-        if self.invincible:
+        # 优先检查作弊模式无敌状态
+        if self.cheat_invincible:
+            self.invincible = True
+            # 作弊模式无敌动画效果
+            if ((self.current_time - self.invincible_start_timer) < 10000):
+                self.losing_invincibility = False
+                self.change_frame_list(30)
+            elif ((self.current_time - self.invincible_start_timer) < 12000):
+                self.losing_invincibility = True
+                self.change_frame_list(100)
+            else:
+                # 重置计时器以保持无敌效果
+                self.invincible_start_timer = self.current_time
+        elif self.invincible:
             if ((self.current_time - self.invincible_start_timer) < 10000):
                 self.losing_invincibility = False
                 self.change_frame_list(30)
@@ -1129,6 +1175,23 @@ class Mario(pg.sprite.Sprite):
             self.image = self.right_frames[self.frame_index]
         else:
             self.image = self.left_frames[self.frame_index]
+    def move_mario_to_position(self, x, y, game_info=None):
+        """将Mario移动到指定位置"""
+        # 直接设置位置
+        self.rect.x = x
+        self.rect.y = y
+    
+        # 重置状态
+        self.state = c.STAND
+        self.x_vel = 0
+        self.y_vel = 0
+        self.dead = False
+        self.in_transition_state = False
+    
+        # 如果需要，更新游戏信息
+        if game_info is not None:
+            game_info[c.MARIO_DEAD] = False
+    
 
 
 
