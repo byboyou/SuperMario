@@ -2,6 +2,7 @@ from __future__ import division
 
 import os
 import pickle
+import random  # 添加random模块
 
 import pygame as pg
 from .. import setup, tools
@@ -22,6 +23,12 @@ from .. components import castle_flag
 class Level2(tools._State):
     def __init__(self):
         tools._State.__init__(self)
+        # 添加随机地形相关属性
+        self.random_terrain_group = pg.sprite.Group()
+        self.last_terrain_generation_time = 0
+        self.terrain_generation_interval = 10000  # 10秒生成一次随机地形
+        self.max_terrain_blocks = 10  # 最大地形块数量
+        self.terrain_block_size = 40  # 地形块大小（大约两个马里奥大小）
 
     def startup(self, current_time, persist):
         """Called when the State object is created"""
@@ -33,6 +40,10 @@ class Level2(tools._State):
 
         self.state = c.NOT_FROZEN
         self.death_timer = 0
+
+        # 初始化随机地形相关属性
+        self.random_terrain_group = pg.sprite.Group()
+        self.last_terrain_generation_time = current_time
 
         self.moving_score_list = []
         self.overhead_info_display = info.OverheadInfo(self.game_info, c.LEVEL)
@@ -96,9 +107,64 @@ class Level2(tools._State):
         self.ground_step_pipe_group = pg.sprite.Group(self.ground_group)
         self.mario_and_enemy_group = pg.sprite.Group(self.mario)
 
+    def generate_random_terrain(self):
+        """生成随机地形，确保砖块不重叠"""
+        # 清除上一次的随机地形
+        self.random_terrain_group.empty()
+        
+        # 生成新的随机地形块
+        num_blocks = random.randint(3, self.max_terrain_blocks)
+        
+        # 存储已生成砖块的位置信息，用于检测重叠
+        existing_blocks = []
+        block_size = self.terrain_block_size
+        
+        attempts = 0
+        max_attempts = 50  # 最大尝试次数，避免无限循环
+        
+        while len(self.random_terrain_group) < num_blocks and attempts < max_attempts:
+            attempts += 1
+            
+            # 随机x位置（避开屏幕边缘）
+            x = random.randint(50, self.level_width - 50 - block_size)
+            
+            # 随机y位置（在地面以上，但不超过屏幕上半部分）
+            min_y = 100  # 最小高度
+            max_y = self.level_height - 120  # 最大高度（地面以上）
+            y = random.randint(min_y, max_y)
+            
+            # 检查是否与现有砖块重叠
+            overlap = False
+            new_block_rect = pg.Rect(x, y, block_size, block_size)
+            
+            for existing_block in existing_blocks:
+                if new_block_rect.colliderect(existing_block):
+                    overlap = True
+                    break
+            
+            # 如果没有重叠，则创建砖块
+            if not overlap:
+                # 创建地形块（使用砖块）
+                terrain_block = bricks.Brick(x, y)
+                self.random_terrain_group.add(terrain_block)
+                existing_blocks.append(new_block_rect)
+        
+        # 如果尝试多次后仍然没有生成足够的地形块，记录信息
+        if len(self.random_terrain_group) < num_blocks:
+            print(f"成功生成 {len(self.random_terrain_group)} 个地形块（尝试 {attempts} 次）")
+
+    def update_random_terrain(self, current_time):
+        """更新随机地形生成"""
+        if current_time - self.last_terrain_generation_time > self.terrain_generation_interval:
+            self.generate_random_terrain()
+            self.last_terrain_generation_time = current_time
+
     def update(self, surface, keys, current_time):
         """Updates Entire level using states. Called by the control object"""
         self.game_info[c.CURRENT_TIME] = self.current_time = current_time
+        
+        # 更新随机地形
+        self.update_random_terrain(current_time)
         
         self.handle_states(keys)
         self.check_if_time_out()
@@ -135,6 +201,9 @@ class Level2(tools._State):
         for score in self.moving_score_list:
             score.update(self.moving_score_list, self.game_info)
         
+        # 更新随机地形
+        self.random_terrain_group.update()
+        
         self.adjust_sprite_positions()
         self.check_if_mario_in_transition_state()
         self.check_for_mario_death()
@@ -164,9 +233,12 @@ class Level2(tools._State):
     def check_mario_x_collisions(self):
         """Check for collisions after Mario is moved on the x axis"""
         collider = pg.sprite.spritecollideany(self.mario, self.ground_step_pipe_group)
+        terrain_collider = pg.sprite.spritecollideany(self.mario, self.random_terrain_group)
         
         if collider:
             self.adjust_mario_for_x_collisions(collider)
+        elif terrain_collider:
+            self.adjust_mario_for_x_collisions(terrain_collider)
 
     def adjust_mario_for_x_collisions(self, collider):
         """Puts Mario flush next to the collider after moving on the x axis"""
@@ -180,9 +252,12 @@ class Level2(tools._State):
     def check_mario_y_collisions(self):
         """Checks for collisions when Mario moves along the y-axis"""
         ground_step_or_pipe = pg.sprite.spritecollideany(self.mario, self.ground_step_pipe_group)
+        terrain_collider = pg.sprite.spritecollideany(self.mario, self.random_terrain_group)
 
         if ground_step_or_pipe:
             self.adjust_mario_for_y_ground_pipe_collisions(ground_step_or_pipe)
+        elif terrain_collider:
+            self.adjust_mario_for_y_terrain_collisions(terrain_collider)
 
         self.test_if_mario_is_falling()
 
@@ -197,10 +272,23 @@ class Level2(tools._State):
             self.mario.rect.top = collider.rect.bottom
             self.mario.state = c.FALL
 
+    def adjust_mario_for_y_terrain_collisions(self, collider):
+        """Mario collisions with random terrain on the y-axis"""
+        if self.mario.rect.y > collider.rect.y:
+            # 从上方碰撞（站在地形上）
+            self.mario.y_vel = 0
+            self.mario.rect.bottom = collider.rect.top
+            self.mario.state = c.WALK
+        else:
+            # 从下方碰撞
+            self.mario.y_vel = 7
+            self.mario.rect.top = collider.rect.bottom
+            self.mario.state = c.FALL
+
     def test_if_mario_is_falling(self):
         """Changes Mario to a FALL state if more than a pixel above a pipe, ground, step or box"""
         self.mario.rect.y += 1
-        test_collide_group = pg.sprite.Group(self.ground_step_pipe_group)
+        test_collide_group = pg.sprite.Group(self.ground_step_pipe_group, self.random_terrain_group)
 
         if pg.sprite.spritecollideany(self.mario, test_collide_group) is None:
             if self.mario.state != c.JUMP and self.mario.state != c.DEATH_JUMP:
@@ -252,7 +340,6 @@ class Level2(tools._State):
 
     def update_viewport(self):
         """Level2地图较小，不需要复杂的视角移动逻辑"""
-        # 由于Level2地图固定为300x200，而屏幕为800x600，可以居中显示或简单处理
         pass
 
     def blit_everything(self, surface):
@@ -282,6 +369,9 @@ class Level2(tools._State):
         
         # 绘制背景
         self.level.blit(self.background, (0, 0))
+        
+        # 绘制随机地形
+        self.random_terrain_group.draw(self.level)
         
         # 绘制马里奥
         self.mario_and_enemy_group.draw(self.level)
